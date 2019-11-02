@@ -1,3 +1,5 @@
+import Pkg
+Pkg.activate(".")
 using DistancePlan
 using Test
 
