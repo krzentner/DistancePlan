@@ -21,8 +21,10 @@ export Box
 
 function distance(center::SVector{N, T}, obstacle::Box{N, T})::T where {N, T <: AbstractFloat}
   diffs = [(obstacle.lows .- center) (center .- obstacle.highs)]
-  max_diffs = maximum(diffs, dims=2)
-  return norm(max_diffs)
+  return maximum(diffs)
+  # max_diffs = maximum(diffs, dims=2)
+  # return maximum(max_diffs)
+  # return minimum(max_diffs) * sign(maximum(max_diffs))
 end
 
 struct Sphere{N, T <: AbstractFloat} <: Volume
@@ -48,6 +50,7 @@ struct SphereTree{N, T <: AbstractFloat}
   SphereTree{N, T}() where {N, T <: AbstractFloat} = new{N, T}([], [], [], [])
 end
 
+export distance
 
 function nearest_sphere(tree::SphereTree{N, T}, point::SVector{N, T})::Int where {N, T <: AbstractFloat}
   return argmin([sum((center .- point) .^ 2) - srad
@@ -70,7 +73,7 @@ function sample(bounds::Box{N, T})::SVector{N, T} where {N, T <: AbstractFloat}
 end
 
 function push_sphere!(tree::SphereTree{N, T}, parent::Int, sphere::Sphere{N, T}) where {N, T <: AbstractFloat}
-  child = length(tree.parent)
+  child = 1 + length(tree.parent)
   push!(tree.centers, sphere.center)
   push!(tree.squared_radii, sphere.radius ^ 2)
   push!(tree.parent, parent)
@@ -82,12 +85,14 @@ function get_sphere(tree::SphereTree{N, T}, sphere::Int)::Sphere{N, T} where {N,
   return Sphere(tree.centers[sphere], sqrt(tree.squared_radii[sphere]))
 end
 
-function evt_step!(tree::SphereTree{N, T}, bounds::Box{N, T}, obstacles::Vector) where {N, T <: AbstractFloat}
+function evt_step!(tree::SphereTree{N, T}, bounds::Box{N, T}, obstacles::Vector; min_radius=10.) where {N, T <: AbstractFloat}
   x = sample(bounds)
   x_near = nearest_sphere(tree, x)
   x_new = project(x, get_sphere(tree, x_near))
   x_new_rad = distance(x_new, obstacles)
-  if x_new_rad > 0
+  # Sphere is of minimum radius and center is in bounds.
+  # Center can be out of bounds due to projection from inside sphere.
+  if x_new_rad > min_radius && distance(x_new, bounds) < 0
     push_sphere!(tree, x_near, Sphere(x_new, x_new_rad))
   end
 end
@@ -104,6 +109,32 @@ function evt(origin::SVector{N, T}, bounds::Box{N, T}, obstacles::Vector, steps:
 end
 
 export evt
+
+function get_path(tree::SphereTree{N, T}, last_idx::Int)::Vector{SVector{N, T}} where {N, T <: AbstractFloat}
+  path = [tree.centers[last_idx]]
+  while last_idx != 1
+    last_idx = tree.parent[last_idx]
+    pushfirst!(path, tree.centers[last_idx])
+  end
+  return path
+end
+
+function evt_goal(origin::SVector{N, T}, bounds::Box{N, T}, obstacles::Vector, goal::SVector{N, T}; min_radius=10.) where {N, T <: AbstractFloat}
+  tree = SphereTree{N, T}()
+  radius = distance(origin, obstacles)
+  origin_sphere = Sphere(origin, radius)
+  push_sphere!(tree, 1, origin_sphere)
+  while true
+    gidx = nearest_sphere(tree, goal)
+    goal_sphere = Sphere(tree.centers[gidx], sqrt(tree.squared_radii[gidx]))
+    if distance(goal, goal_sphere) <= 0
+      return tree, get_path(tree, gidx)
+    end
+    evt_step!(tree, bounds, obstacles, min_radius=min_radius)
+  end
+end
+
+export evt_goal
 
 import Makie
 
