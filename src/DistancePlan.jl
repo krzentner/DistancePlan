@@ -2,77 +2,74 @@ module DistancePlan
 
 using StaticArrays
 
-function norm(v::SVector{N, T})::T where {N, T <: AbstractFloat}
+function norm(v)
   return sqrt(sum(v .^ 2))
 end
 
-function distance(center::SVector{N, T}, obstacle::SVector{N, T})::T where {N, T <: AbstractFloat}
+function distance(center, obstacle::AbstractVector{T}) where {T <: AbstractFloat}
   return norm(center .- obstacle)
 end
 
 abstract type Volume end
 
-struct Box{N, T <: AbstractFloat} <: Volume
-  lows::SVector{N, T}
-  highs::SVector{N, T}
+struct Box <: Volume
+  lows
+  highs
 end
 
 export Box
 
-function distance(center::SVector{N, T}, obstacle::Box{N, T})::T where {N, T <: AbstractFloat}
+function distance(center, obstacle::Box)
   diffs = [(obstacle.lows .- center) (center .- obstacle.highs)]
   return maximum(diffs)
-  # max_diffs = maximum(diffs, dims=2)
-  # return maximum(max_diffs)
-  # return minimum(max_diffs) * sign(maximum(max_diffs))
 end
 
-struct Sphere{N, T <: AbstractFloat} <: Volume
-  center::SVector{N, T}
-  radius::T
+struct Sphere <: Volume
+  center
+  radius
 end
 
 export Sphere
 
-function distance(center::SVector{N, T}, obstacle::Sphere{N, T})::T where {N, T <: AbstractFloat}
+function distance(center, obstacle::Sphere)
   return norm(center .- obstacle.center) - obstacle.radius
 end
 
-function distance(center::SVector{N, T}, obstacle::AbstractVector)::T where {N, T <: AbstractFloat}
+function distance(center, obstacle::AbstractVector)
   return minimum([distance(center, obs) for obs=obstacle])
 end
 
-struct SphereTree{N, T <: AbstractFloat}
-  centers::Vector{SVector{N, T}}
-  squared_radii::Vector{T}
+struct SphereTree
+  centers::Vector
+  squared_radii::Vector
   children::Vector{Vector{Int}}
   parent::Vector{Int}
-  SphereTree{N, T}() where {N, T <: AbstractFloat} = new{N, T}([], [], [], [])
+  SphereTree() = new([], [], [], [])
 end
 
 export distance
 
-function nearest_sphere(tree::SphereTree{N, T}, point::SVector{N, T})::Int where {N, T <: AbstractFloat}
+function nearest_sphere(tree::SphereTree, point)::Int
   return argmin([sum((center .- point) .^ 2) - srad
                  for (center, srad) in zip(tree.centers, tree.squared_radii)])
 end
 
-function project(point::SVector{N, T}, sphere::Sphere{N, T})::SVector{N, T} where {N, T <: AbstractFloat}
+function project(point, sphere::Sphere)
   v = point .- sphere.center
   v /= norm(v)
-  v = SVector{N, T}(v .* sphere.radius .+ sphere.center)
+  v = v .* sphere.radius .+ sphere.center
   draw!(v, color="orange")
   return v
 end
 
-function sample(bounds::Box{N, T})::SVector{N, T} where {N, T <: AbstractFloat}
+function sample(bounds::Box)::SVector{N} where {N}
   r = rand(N)
-  x = SVector{N, T}((bounds.highs .- bounds.lows) .* r .+ bounds.lows)
+  x = SVector{N}((bounds.highs .- bounds.lows) .* r .+ bounds.lows)
   draw!(x, color="blue")
   return x
 end
 
-function push_sphere!(tree::SphereTree{N, T}, parent::Int, sphere::Sphere{N, T}) where {N, T <: AbstractFloat}
+function push_sphere!(tree::SphereTree, parent::Int, sphere::Sphere)
   child = 1 + length(tree.parent)
   push!(tree.centers, sphere.center)
   push!(tree.squared_radii, sphere.radius ^ 2)
@@ -81,12 +78,12 @@ function push_sphere!(tree::SphereTree{N, T}, parent::Int, sphere::Sphere{N, T})
   push!(tree.children[parent], child)
 end
 
-function get_sphere(tree::SphereTree{N, T}, sphere::Int)::Sphere{N, T} where {N, T <: AbstractFloat}
+function get_sphere(tree::SphereTree, sphere::Int)
   return Sphere(tree.centers[sphere], sqrt(tree.squared_radii[sphere]))
 end
 
-function evt_step!(tree::SphereTree{N, T}, bounds::Box{N, T}, obstacles::Vector; min_radius=10.) where {N, T <: AbstractFloat}
-  x = sample(bounds)
+function evt_step!(tree::SphereTree, bounds::Box, obstacles::Vector; min_radius=10.) where {N}
+  x = sample{N}(bounds)
   x_near = nearest_sphere(tree, x)
   x_new = project(x, get_sphere(tree, x_near))
   x_new_rad = distance(x_new, obstacles)
@@ -97,20 +94,20 @@ function evt_step!(tree::SphereTree{N, T}, bounds::Box{N, T}, obstacles::Vector;
   end
 end
 
-function evt(origin::SVector{N, T}, bounds::Box{N, T}, obstacles::Vector, steps::Int) where {N, T <: AbstractFloat}
-  tree = SphereTree{N, T}()
+function evt(origin::SVector, bounds::Box, obstacles::Vector, steps::Int) where {N}
+  tree = SphereTree()
   radius = distance(origin, obstacles)
   origin_sphere = Sphere(origin, radius)
   push_sphere!(tree, 1, origin_sphere)
   for iter in 1:steps
-    evt_step!(tree, bounds, obstacles)
+    evt_step!{N}(tree, bounds, obstacles)
   end
   return tree
 end
 
 export evt
 
-function get_path(tree::SphereTree{N, T}, last_idx::Int)::Vector{SVector{N, T}} where {N, T <: AbstractFloat}
+function get_path(tree::SphereTree, last_idx::Int)::Vector
   path = [tree.centers[last_idx]]
   while last_idx != 1
     last_idx = tree.parent[last_idx]
@@ -119,8 +116,8 @@ function get_path(tree::SphereTree{N, T}, last_idx::Int)::Vector{SVector{N, T}} 
   return path
 end
 
-function evt_goal(origin::SVector{N, T}, bounds::Box{N, T}, obstacles::Vector, goal::SVector{N, T}; min_radius=10.) where {N, T <: AbstractFloat}
-  tree = SphereTree{N, T}()
+function evt_goal(origin::SVector, bounds::Box, obstacles::Vector, goal::SVector; min_radius=10.)
+  tree = SphereTree()
   radius = distance(origin, obstacles)
   origin_sphere = Sphere(origin, radius)
   push_sphere!(tree, 1, origin_sphere)
@@ -138,7 +135,7 @@ export evt_goal
 
 import Makie
 
-function draw!(box::Box{2, T}; color="red") where {T <: AbstractFloat}
+function draw!(box::Box; color="red")
   lx, ly = box.lows
   hx, hy = box.highs
   points = [
@@ -152,7 +149,7 @@ function draw!(box::Box{2, T}; color="red") where {T <: AbstractFloat}
   Makie.plot!(points[:, 1], points[:, 2], color=color)
 end
 
-function draw!(sphere::Sphere{2, T}; points=64, color="red") where {T <: AbstractFloat}
+function draw!(sphere::Sphere; points=64, color="red")
   cx, cy = sphere.center
   r = sphere.radius
   t = range(0, 2pi, length=points)
@@ -161,7 +158,7 @@ function draw!(sphere::Sphere{2, T}; points=64, color="red") where {T <: Abstrac
   Makie.plot!(x, y, color=color)
 end
 
-function draw!(obstacle::SVector{2, T}; delta=0.1, color="red") where {T <: AbstractFloat}
+function draw!(obstacle::SVector; delta=0.1, color="red")
   x, y = obstacle
   points = [
       x - delta y - delta
@@ -174,7 +171,7 @@ function draw!(obstacle::SVector{2, T}; delta=0.1, color="red") where {T <: Abst
   Makie.plot!(points[:, 1], points[:, 2], color=color)
 end
 
-function draw!(tree::SphereTree{N, T}; color="green") where {N, T <: AbstractFloat}
+function draw!(tree::SphereTree; color="green")
   for (center, srad) in zip(tree.centers, tree.squared_radii)
     draw!(Sphere(center, sqrt(srad)), color=color)
   end
