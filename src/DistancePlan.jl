@@ -107,7 +107,7 @@ end
 
 export evt
 
-function get_path(tree::SphereTree, last_idx::Int)::Vector
+function get_path(tree, last_idx::Int)::Vector
   path = [tree.centers[last_idx]]
   while last_idx != 1
     last_idx = tree.parent[last_idx]
